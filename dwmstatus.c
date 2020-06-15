@@ -1,9 +1,3 @@
-/*
- * Copy me if you can.
- * by 20h
- */
-
-#define _BSD_SOURCE
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,9 +11,7 @@
 
 #include <X11/Xlib.h>
 
-char *tzargentina = "America/Buenos_Aires";
-char *tzutc = "UTC";
-char *tzberlin = "Europe/Berlin";
+char *tz = "Europe/Paris";
 
 static Display *dpy;
 
@@ -116,11 +108,8 @@ readfile(char *base, char *file)
 char *
 getbattery(char *base)
 {
-	char *co, status;
-	int descap, remcap;
-
-	descap = -1;
-	remcap = -1;
+	char *co;
+    int cap = -1;
 
 	co = readfile(base, "present");
 	if (co == NULL)
@@ -131,92 +120,74 @@ getbattery(char *base)
 	}
 	free(co);
 
-	co = readfile(base, "charge_full_design");
+	co = readfile(base, "capacity");
 	if (co == NULL) {
-		co = readfile(base, "energy_full_design");
-		if (co == NULL)
-			return smprintf("");
+        return smprintf("");
 	}
-	sscanf(co, "%d", &descap);
-	free(co);
-
-	co = readfile(base, "charge_now");
-	if (co == NULL) {
-		co = readfile(base, "energy_now");
-		if (co == NULL)
-			return smprintf("");
-	}
-	sscanf(co, "%d", &remcap);
-	free(co);
-
-	co = readfile(base, "status");
-	if (!strncmp(co, "Discharging", 11)) {
-		status = '-';
-	} else if(!strncmp(co, "Charging", 8)) {
-		status = '+';
-	} else {
-		status = '?';
-	}
-
-	if (remcap < 0 || descap < 0)
-		return smprintf("invalid");
-
-	return smprintf("%.0f%%%c", ((float)remcap / (float)descap) * 100, status);
+    cap = atoi(co);
+    free(co);
+    return smprintf("%d%%", cap);
 }
 
 char *
 gettemperature(char *base, char *sensor)
 {
-	char *co;
+    char* co;
+    double temp = 0;
+    
+    co = readfile(base, sensor);
+    if (co == NULL)
+        return smprintf("");
+    temp = atof(co);
+    free(co);
+    return smprintf("%02.0f°C", temp/1000);
+}
 
-	co = readfile(base, sensor);
-	if (co == NULL)
-		return smprintf("");
-	return smprintf("%02.0f°C", atof(co) / 1000);
+char *
+getfanspeed(char *base, char *sensor)
+{
+    char *co;
+    int rpm = -1;
+
+    co = readfile(base, sensor);
+    if (co == NULL)
+        return smprintf("");
+    rpm = atoi(co);
+    free(co);
+    return smprintf("%drpm", rpm);
 }
 
 int
 main(void)
 {
 	char *status;
-	char *avgs;
 	char *bat;
-	char *bat1;
-	char *tmar;
-	char *tmutc;
-	char *tmbln;
-	char *t0, *t1, *t2;
+	char *time;
+    char *tcpu;
+    char *rpm1;
+    char *rpm2;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	for (;;sleep(60)) {
-		avgs = loadavg();
+    for (;;sleep(10)) {
+        tcpu = gettemperature("/sys/class/hwmon/hwmon6", "temp1_input");
 		bat = getbattery("/sys/class/power_supply/BAT0");
-		bat1 = getbattery("/sys/class/power_supply/BAT1");
-		tmar = mktimes("%H:%M", tzargentina);
-		tmutc = mktimes("%H:%M", tzutc);
-		tmbln = mktimes("KW %W %a %d %b %H:%M %Z %Y", tzberlin);
-		t0 = gettemperature("/sys/devices/virtual/hwmon/hwmon0", "temp1_input");
-		t1 = gettemperature("/sys/devices/virtual/hwmon/hwmon2", "temp1_input");
-		t2 = gettemperature("/sys/devices/virtual/hwmon/hwmon4", "temp1_input");
+		time = mktimes("%H:%M", tz);
+        rpm1 = getfanspeed("/sys/class/hwmon/hwmon5", "fan1_input");
+        rpm2 = getfanspeed("/sys/class/hwmon/hwmon5", "fan2_input");
 
-		status = smprintf("T:%s|%s|%s L:%s B:%s|%s A:%s U:%s %s",
-				t0, t1, t2, avgs, bat, bat1, tmar, tmutc,
-				tmbln);
+		status = smprintf("T:%s | Fans: %s %s | B:%s | %s",
+				tcpu, rpm1, rpm2, bat, time);
 		setstatus(status);
-
-		free(t0);
-		free(t1);
-		free(t2);
-		free(avgs);
+    
+        free(tcpu);
+        free(rpm1);
+        free(rpm2);
 		free(bat);
-		free(bat1);
-		free(tmar);
-		free(tmutc);
-		free(tmbln);
+		free(time);
 		free(status);
 	}
 
