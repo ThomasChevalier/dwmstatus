@@ -126,7 +126,18 @@ getbattery(char *base)
 	}
     cap = atoi(co);
     free(co);
-    return smprintf("%d%%", cap);
+
+    if(cap >= 80){
+        return smprintf("^c#282c34^^b#a3be8c^ \uf240  ^c#a3be8c^^b#282c34^ %d%%^c#abb2bf^", cap);
+    }else if(cap >= 60){
+        return smprintf("^c#282c34^^b#a3be8c^ \uf241  ^c#a3be8c^^b#282c34^ %d%%^c#abb2bf^", cap);
+    }else if(cap >= 40){
+        return smprintf("^c#282c34^^b#a3be8c^ \uf242  ^c#a3be8c^^b#282c34^ %d%%^c#abb2bf^", cap);
+    }else if(cap >= 20){
+        return smprintf("^c#282c34^^b#a3be8c^ \uf243  ^c#a3be8c^^b#282c34^ %d%%^c#abb2bf^", cap);
+    }else{
+        return smprintf("^c#282c34^^b#a3be8c^ \uf244  ^c#a3be8c^^b#282c34^ %d%%^c#abb2bf^", cap);
+    }
 }
 
 char *
@@ -138,9 +149,17 @@ gettemperature(char *base, char *sensor)
     co = readfile(base, sensor);
     if (co == NULL)
         return smprintf("");
-    temp = atof(co);
+    temp = atof(co)/1000;
     free(co);
-    return smprintf("%02.0f°C", temp/1000);
+
+    if (temp >= 60){
+        return smprintf("^c#282c34^^b#df425e^ \ue20b ^c#df425e^^b#282c34^ %02.0f°C^c#abb2bf^", temp);
+    } else if (temp >= 40){
+        return smprintf("^c#282c34^^b#df425e^ \ue20a ^c#df425e^^b#282c34^ %02.0f°C^c#abb2bf^", temp);
+    }
+    else{
+        return smprintf("^c#282c34^^b#df425e^ \ue20c ^c#df425e^^b#282c34^ %02.0f°C^c#abb2bf^", temp);
+    }
 }
 
 char *
@@ -154,7 +173,7 @@ getfanspeed(char *base, char *sensor)
         return smprintf("");
     rpm = atoi(co);
     free(co);
-    return smprintf("%drpm", rpm);
+    return smprintf("%d", rpm);
 }
 
 int
@@ -179,7 +198,7 @@ main(void)
         rpm1 = getfanspeed("/sys/class/hwmon/hwmon5", "fan1_input");
         rpm2 = getfanspeed("/sys/class/hwmon/hwmon5", "fan2_input");
 
-		status = smprintf("T:%s | Fans: %s %s | B:%s | %s",
+		status = smprintf("%s ^c#282c34^^b#88c0d0^ \uf70f ^c#88c0d0^^b#282c34^ %s %s rpm ^c#abb2bf^%s | %s",
 				tcpu, rpm1, rpm2, bat, time);
 		setstatus(status);
     
