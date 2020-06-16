@@ -215,10 +215,21 @@ void get_power(BlockData* data)
     long int current = 0;
     long int voltage = 0;
 
-    strcpy(data->icon, "\uf0e7");
     strcpy(data->color, "#d06c4c");
 
     char *file;
+
+    /* Hide the block if battery full */
+    file = read_file("/sys/class/power_supply/BAT0/status");
+    if(file != NULL && !strcmp(file,"Full\n")){
+        strcpy(data->icon, "");
+        strcpy(data->text, "");
+        return;
+    }
+
+    strcpy(data->icon, "\uf0e7");
+
+
     file = read_file("/sys/class/power_supply/BAT0/current_now");
     if (file == NULL){
         strcpy(data->text, "\uf071 ");
@@ -317,7 +328,11 @@ void get_fan_speed(BlockData* data)
     if(rpm1_i == -1 && rpm2_i == -1){
         txt = smprintf("%s %s", rpm1, rpm2);
     }else{
-        txt = smprintf("%s %s rpm", rpm1, rpm2);
+        if(rpm1_i == 0 && rpm2_i == 0){
+            txt = smprintf(" ");
+        }else{
+            txt = smprintf("%s %s rpm", rpm1, rpm2);
+        }
     }
 
     if((rpm1_i != -1 || rpm2_i != -1) && (rpm1_i == 0 && rpm2_i == 0)){
@@ -407,9 +422,13 @@ void get_volume(BlockData* data)
 
     strcpy(data->color, "#ebcb8b");
 
-    char *str = smprintf("%d%%", actual_volume);
-    strcpy(data->text, str);
-    free(str);
+    if (actual_volume != 0){
+        char *str = smprintf("%d%%", actual_volume);
+        strcpy(data->text, str);
+        free(str);     
+    } else{
+        strcpy(data->text, " ");
+    }
 
 }
 
@@ -419,9 +438,18 @@ void sleep_until(time_t seconds)
     sleep(seconds-time(NULL));
 }
 
+int all_space(char *str){
+    while(*str != 0){
+        if(*str != ' '){
+            return 0;
+        }
+        ++str;
+    }
+    return 1;
+}
 
-int
-main(void)
+
+int main(void)
 {
     BlockData data;
     char status[LENGTH(blocks)*128];
@@ -457,9 +485,17 @@ main(void)
                      free(block_strings[i]);
                 }
                 if(strlen(data.icon) != 0 && strlen(data.text) != 0){
-                    block_strings[i] = smprintf("^c%s^^b%s^ %s ^c%s^^b%s^ %s ", bar_color, data.color, data.icon, data.color, bar_color, data.text);
+                    if(all_space(data.text)){
+                        block_strings[i] = smprintf("^c%s^^b%s^ %s ^c%s^^b%s^%s", bar_color, data.color, data.icon, data.color, bar_color, data.text);
+                    }else{
+                        block_strings[i] = smprintf("^c%s^^b%s^ %s ^c%s^^b%s^ %s ", bar_color, data.color, data.icon, data.color, bar_color, data.text);
+                    }
                 }else if (strlen(data.icon) == 0 && strlen(data.text) != 0){
-                    block_strings[i] = smprintf("^c%s^^b%s^ %s ", data.color, bar_color, data.text);
+                    if(all_space(data.text)){
+                        block_strings[i] = smprintf("%s", data.text);
+                    }else{
+                        block_strings[i] = smprintf("^c%s^^b%s^ %s ", data.color, bar_color, data.text);
+                    }
                 }else if (strlen(data.icon) != 0 && strlen(data.text) == 0){
                     block_strings[i] = smprintf("^c%s^^b%s^ %s ", bar_color, data.color, data.icon);
                 }else{
