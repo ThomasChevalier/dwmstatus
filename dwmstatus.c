@@ -27,6 +27,8 @@ typedef struct {
 typedef struct {
     void (*query)(BlockData*);
     const int interval;
+    const time_t align;
+    const int delay;
 } Block;
 
 /* function declarations */
@@ -52,13 +54,19 @@ static const char bar_color[] = "#282828";
 
 
 static const Block blocks[] = {
-    /* query      interval  */
-    { get_volume,       1 },
-    { get_fan_speed,    20 },
-    { get_battery,      120},
-    { get_power,        20},
-    { get_temperature,  20 },
-    { get_time,         60 },
+    /* query:    function to call periodically
+     * interval: how many seconds between each call of `query`
+     * align:    align the interval with the specified epoch time if non zero
+     * delay:    time to wait before the first call of the `query`.
+     *           If -1 and align != 0, start immediately the `query` and align the next calls.
+     */
+    /* query      interval         align  delay */
+    { get_volume,       1,             0,    0 },
+    { get_fan_speed,    20,            0,    0 },
+    { get_battery,      120,           0,    0 },
+    { get_power,        20,            0,    0 },
+    { get_temperature,  20,            0,    0 },
+    { get_time,         60,   1592384460,   -1 },
 };
 
 
@@ -351,22 +359,36 @@ void get_fan_speed(BlockData* data)
 
 void get_volume(BlockData* data)
 {
+    strcpy(data->icon, "\ufa7d");
+    strcpy(data->color, "#ebcb8b");
+    strcpy(data->text, "\uf071 ");
+
     int vol;
     snd_hctl_t *hctl;
     snd_ctl_elem_id_t *id;
     snd_ctl_elem_value_t *control;
 
-// To find card and subdevice: /proc/asound/, aplay -L, amixer controls
-    snd_hctl_open(&hctl, "hw:0", 0);
-    snd_hctl_load(hctl);
+    // To find card and subdevice: /proc/asound/, aplay -L, amixer controls
+    if(snd_hctl_open(&hctl, "hw:0", 0)<0){
+        fprintf(stderr, "%s", "snd_hctl_open"); 
+        return;
+    }
+    if(snd_hctl_load(hctl)<0){
+        fprintf(stderr, "%s", "snd_hctl_load"); 
+        return;
+    }
 
     snd_ctl_elem_id_alloca(&id);
     snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
 
-// amixer controls
+    // amixer controls
     snd_ctl_elem_id_set_name(id, "Master Playback Volume");
 
     snd_hctl_elem_t *elem = snd_hctl_find_elem(hctl, id);
+    if(elem == NULL){
+        fprintf(stderr, "%s", "snd_hctl_find_elemooo"); 
+        return;
+    }
 
     snd_ctl_elem_value_alloca(&control);
     snd_ctl_elem_value_set_id(control, id);
@@ -451,24 +473,39 @@ int all_space(char *str){
 
 int main(void)
 {
-    BlockData data;
-    char status[LENGTH(blocks)*128];
-
     if (!(dpy = XOpenDisplay(NULL))) {
         fprintf(stderr, "dwmstatus: cannot open display.\n");
         return 1;
     }
 
-    time_t now = time(NULL);
+    BlockData data;
+    char status[LENGTH(blocks)*128];
+
+    /* flags:
+     * 0x01 -> call it now
+     */ 
+    int flags[LENGTH(blocks)] = {0};
+
     time_t next_update[LENGTH(blocks)];
     char* block_strings[LENGTH(blocks)];
 
+    time_t now = time(NULL);
     for(int i=0; i < LENGTH(blocks); ++i){
-        next_update[i] = now;
+        if(blocks[i].align != 0){
+            time_t delta = now - blocks[i].align;
+            double passed = delta / (double)blocks[i].interval;
+            next_update[i] = ceil(passed)*blocks[i].interval + blocks[i].align + blocks[i].delay;
+           
+            if(blocks[i].delay == -1){
+                flags[i] |= 1<<0;
+                next_update[i] += 1;
+            }
+
+        }else{
+            next_update[i] = now+blocks[i].delay;
+        }
         block_strings[i] = NULL;
     }
-
-
 
     while(1){
 
@@ -477,7 +514,8 @@ int main(void)
         int changed = 0;
         for(int i=0; i < LENGTH(blocks); ++i){
 
-            if (next_update[i] <= now){
+            if (next_update[i] <= now || (flags[i] & (1<<0) )){
+
                 /* Query informations and format them using status2d color codes */
                 blocks[i].query(&data);
 
@@ -501,7 +539,15 @@ int main(void)
                 }else{
                     block_strings[i] = smprintf("");
                 }
-                next_update[i] += blocks[i].interval;
+
+                /* normal case */
+                if (next_update[i] <= now){
+                    next_update[i] += blocks[i].interval;
+                }
+                if(flags[i] & (1<<0)){
+                    flags[i] &= ~(1<<0);
+                }
+
                 changed = 1;
             }
 
@@ -511,11 +557,11 @@ int main(void)
         if(changed){
             memset(status, 0, sizeof(status));
             for(int i=0; i < LENGTH(blocks); ++i){
-                strcat(status, block_strings[i]);
+                if(block_strings[i] != NULL){
+                    strcat(status, block_strings[i]);
+                }
             }
             setstatus(status);
-        }else{
-            printf("Not changed\n");
         }
 
         /* Determine how long we can sleep */
