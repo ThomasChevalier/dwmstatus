@@ -32,7 +32,6 @@ typedef struct {
 } Block;
 
 /* function declarations */
-char* strip(char* str);
 char* smprintf(char *fmt, ...);
 void setstatus(char *str);
 char* read_file(char *path);
@@ -52,7 +51,6 @@ static Display *dpy;
 /* configuration */
 static const char bar_color[] = "#282828";
 
-
 static const Block blocks[] = {
     /* query:    function to call periodically
      * interval: how many seconds between each call of `query`
@@ -71,15 +69,6 @@ static const Block blocks[] = {
 
 
 
-char* strip(char* str)
-{
-    size_t ln = strlen(str) - 1;
-    if (*str && str[ln] == '\n') {
-        str[ln] = '\0';
-    }
-    return str;
-}
-
 char* smprintf(char *fmt, ...)
 {
     va_list fmtargs;
@@ -92,7 +81,7 @@ char* smprintf(char *fmt, ...)
 
     ret = malloc(++len);
     if (ret == NULL) {
-        perror("malloc");
+        perror("smprintf: malloc");
         exit(1);
     }
 
@@ -109,23 +98,47 @@ void setstatus(char *str)
     XSync(dpy, False);
 }
 
-
 char* read_file(char *path)
 {
-    char line[513];
-    FILE *fd;
-
-    memset(line, 0, sizeof(line));
-
-    fd = fopen(path, "r");
-    if (fd == NULL)
+    FILE *fd = fopen(path, "r");
+    if (fd == NULL){
+        fprintf(stderr, "fopen: unknown file '%s'", path);
         return NULL;
+    }
 
-    if (fgets(line, sizeof(line)-1, fd) == NULL)
+    if(fseek(fd, 0, SEEK_END) != 0){
+        perror("fseek(SEEK_END)");
         return NULL;
+    }
+
+    long int fsize = ftell(fd);
+    if(fsize == -1){
+        perror("ftell");
+        return NULL;
+    }
+
+    if(fseek(fd, 0, SEEK_SET) != 0){
+        perror("fseek(SEEK_SET)");
+        return NULL;
+    }
+
+    char *content = malloc(fsize + 1);
+    if(content == NULL){
+        perror("read_file: malloc");
+        return NULL;
+    }
+
+    size_t ret = fread(content, sizeof(char), fsize, fd);
+    /* Ignore cases when ret != fsize because /sys files always get fsize=4096 but fewer real length */
+    if(ret == 0){
+        fprintf(stderr, "fread: bad return code (%ld instead of %ld) ", ret, fsize);
+        return NULL; 
+    }
+
+    content[fsize] = 0;
     fclose(fd);
 
-    return smprintf("%s", line);
+    return content;
 }
 
 void get_time(BlockData* data)
@@ -223,20 +236,27 @@ void get_power(BlockData* data)
     long int current = 0;
     long int voltage = 0;
 
+    strcpy(data->icon, "\uf0e7");
     strcpy(data->color, "#d06c4c");
 
     char *file;
 
     /* Hide the block if battery full */
     file = read_file("/sys/class/power_supply/BAT0/status");
-    if(file != NULL && !strcmp(file,"Full\n")){
-        strcpy(data->icon, "");
-        strcpy(data->text, "");
+    if(file == NULL){
+        strcpy(data->text, "\uf071 ");
         return;
+    }else{
+        if(!strcmp(file,"Full\n")){
+            strcpy(data->icon, "");
+            strcpy(data->text, "");
+            return;
+        }
+        free(file);
     }
+    
 
-    strcpy(data->icon, "\uf0e7");
-
+    
 
     file = read_file("/sys/class/power_supply/BAT0/current_now");
     if (file == NULL){
@@ -244,6 +264,7 @@ void get_power(BlockData* data)
         return;
     }else{
         current = strtol(file, NULL, 10);
+        free(file);
     }
 
     file = read_file("/sys/class/power_supply/BAT0/voltage_now");
@@ -252,6 +273,7 @@ void get_power(BlockData* data)
         return;
     }else{
         voltage = strtol(file, NULL, 10);
+        free(file);
     }
 
     if(voltage == 0 || current == 0){
@@ -447,7 +469,7 @@ void get_volume(BlockData* data)
     if (actual_volume != 0){
         char *str = smprintf("%d%%", actual_volume);
         strcpy(data->text, str);
-        free(str);     
+        free(str);
     } else{
         strcpy(data->text, " ");
     }
