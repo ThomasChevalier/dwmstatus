@@ -48,6 +48,9 @@ void get_ram(BlockData* data);
 
 void sleep_until(time_t seconds);
 int all_space(char *str);
+char* strip(char* str);
+char* find_in_dir(char* path, char* hwmon_name, char* file);
+char* find_sensor(char* path, char* hwmon_name, char* file);
 void detect_sensors(void);
 void free_sensors(void);
 
