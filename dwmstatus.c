@@ -9,6 +9,7 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/sysinfo.h>
 #include <math.h>
 
 #include <alsa/asoundlib.h>
@@ -42,6 +43,7 @@ void get_power(BlockData* data);
 void get_temperature(BlockData* data);
 void get_fan_speed(BlockData* data);
 void get_volume(BlockData* data);
+void get_ram(BlockData* data);
 
 #define LENGTH(X) (sizeof X / sizeof X[0])
 
@@ -60,6 +62,7 @@ static const Block blocks[] = {
      */
     /* query      interval         align  delay */
     { get_volume,       1,             0,    0 },
+    { get_ram,          60,            0,    0 },
     { get_fan_speed,    20,            0,    0 },
     { get_battery,      120,           0,    0 },
     { get_power,        20,            0,    0 },
@@ -476,6 +479,65 @@ void get_volume(BlockData* data)
 
 }
 
+void get_ram(BlockData* data)
+{
+    strcpy(data->icon, "\ue266");
+    strcpy(data->color, "#ebcb8b");
+
+    struct sysinfo s;
+    if(sysinfo(&s) != 0){
+        perror("sysinfo");
+        strcpy(data->text, "\uf071 ");
+        return;
+    }
+
+    unsigned long used_ram = (s.totalram-s.freeram)*s.mem_unit/(1048576);
+    unsigned long used_swap = (s.totalswap-s.freeswap)*s.mem_unit/(1048576);
+
+    char* ram_str;
+    if(used_ram > 1024){
+        double used_f = used_ram / 1024.;
+        ram_str = smprintf("%.1fG", used_f);
+    }else{
+        ram_str = smprintf("%ldM", used_ram);
+    }
+
+    char* swap_str = NULL;
+    if(used_swap > 1024){
+        double used_f = used_swap / 1024.;
+        swap_str = smprintf("%.1fG", used_f);
+    }else if(used_swap > 0){
+        swap_str = smprintf("%ldM", used_swap);
+    }
+
+    char* str;
+    if(swap_str != NULL){
+        str = smprintf("%s S: %s", ram_str, swap_str);
+    }else{
+        str = smprintf("%s", ram_str);
+    }
+    free(ram_str);
+    if(swap_str){
+        free(swap_str);
+    }
+
+    // printf("uptime %ld\n", s.uptime);             
+    // printf("%ld %ld %ld\n", s.loads[0], s.loads[1], s.loads[2]);
+    // printf("totalram %ld\n",s.totalram);
+    // printf("freeram %ld\n",s.freeram);
+    // printf("sharedram %ld\n",s.sharedram);
+    // printf("bufferram %ld\n",s.bufferram);
+    // printf("totalswap %ld\n",s.totalswap);
+    // printf("freeswap %ld\n",s.freeswap);
+    // printf("procs %i\n", s.procs);
+    // printf("totalhigh %ld\n",s.totalhigh);
+    // printf("freehigh %ld\n",s.freehigh);
+    // printf("mem_unit %d\n", s.mem_unit);
+    
+    strcpy(data->text, str);
+    free(str);
+
+}
 
 void sleep_until(time_t seconds)
 {
