@@ -5,12 +5,13 @@
 #include <stdint.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/time.h>
 #include <time.h>
+#include <math.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/sysinfo.h>
-#include <math.h>
+#include <dirent.h>
 
 #include <alsa/asoundlib.h>
 #include <alsa/control.h>
@@ -45,10 +46,24 @@ void get_fan_speed(BlockData* data);
 void get_volume(BlockData* data);
 void get_ram(BlockData* data);
 
+void sleep_until(time_t seconds);
+int all_space(char *str);
+void detect_sensors(void);
+void free_sensors(void);
+
 #define LENGTH(X) (sizeof X / sizeof X[0])
 
 /* variables */
 static Display *dpy;
+
+static char* fan1_sensor;        // "/sys/class/hwmon/hwmon5/fan1_input"
+static char* fan2_sensor;        // "/sys/class/hwmon/hwmon5/fan2_input"
+static char* cpu_sensor;         // "/sys/class/hwmon/hwmon6/temp1_input"
+static char* bat_status_sensor;  // "/sys/class/power_supply/BAT0/status"
+static char* bat_curr_sensor;    // "/sys/class/power_supply/BAT0/current_now"
+static char* bat_volt_sensor;    // "/sys/class/power_supply/BAT0/voltage_now"
+static char* bat_present_sensor; // "/sys/class/power_supply/BAT0/present"
+static char* bat_capa_sensor;    // "/sys/class/power_supply/BAT0/capacity"
 
 /* configuration */
 static const char bar_color[] = "#282828";
@@ -61,7 +76,7 @@ static const Block blocks[] = {
      *           If -1 and align != 0, start immediately the `query` and align the next calls.
      */
     /* query      interval         align  delay */
-    { get_volume,       1,             0,    0 },
+    { get_volume,       1,             0,   10 },
     { get_ram,          60,            0,    0 },
     { get_fan_speed,    20,            0,    0 },
     { get_battery,      120,           0,    0 },
@@ -103,6 +118,10 @@ void setstatus(char *str)
 
 char* read_file(char *path)
 {
+    if(!path){
+        return NULL;
+    }
+
     FILE *fd = fopen(path, "r");
     if (fd == NULL){
         fprintf(stderr, "fopen: unknown file '%s'", path);
@@ -132,13 +151,13 @@ char* read_file(char *path)
     }
 
     size_t ret = fread(content, sizeof(char), fsize, fd);
-    /* Ignore cases when ret != fsize because /sys files always get fsize=4096 but fewer real length */
+    /* Ignore cases when ret != fsize because /sys files always get fsize=4096 but a smaller real length */
     if(ret == 0){
         fprintf(stderr, "fread: bad return code (%ld instead of %ld) ", ret, fsize);
         return NULL; 
     }
 
-    content[fsize] = 0;
+    content[ret] = 0;
     fclose(fd);
 
     return content;
@@ -192,7 +211,7 @@ void get_battery(BlockData* data)
     char *str;
     int cap = -1;
 
-    str = read_file("/sys/class/power_supply/BAT0/present");
+    str = read_file(bat_present_sensor);
     if (str == NULL){
         str = smprintf("\uf071 ");
     }
@@ -202,7 +221,7 @@ void get_battery(BlockData* data)
     }
     else{
         free(str);
-        str = read_file("/sys/class/power_supply/BAT0/capacity");
+        str = read_file(bat_capa_sensor);
         if (str == NULL) {
             str = smprintf("\uf071 ");
         }else{
@@ -245,7 +264,7 @@ void get_power(BlockData* data)
     char *file;
 
     /* Hide the block if battery full */
-    file = read_file("/sys/class/power_supply/BAT0/status");
+    file = read_file(bat_status_sensor);
     if(file == NULL){
         strcpy(data->text, "\uf071 ");
         return;
@@ -259,9 +278,7 @@ void get_power(BlockData* data)
     }
     
 
-    
-
-    file = read_file("/sys/class/power_supply/BAT0/current_now");
+    file = read_file(bat_curr_sensor);
     if (file == NULL){
         strcpy(data->text, "\uf071 ");
         return;
@@ -270,7 +287,7 @@ void get_power(BlockData* data)
         free(file);
     }
 
-    file = read_file("/sys/class/power_supply/BAT0/voltage_now");
+    file = read_file(bat_volt_sensor);
     if (file == NULL){
         strcpy(data->text, "\uf071 ");
         return;
@@ -309,7 +326,7 @@ void get_temperature(BlockData* data)
     char* str;
     double temp = 0;
     
-    str = read_file("/sys/class/hwmon/hwmon6/temp1_input");
+    str = read_file(cpu_sensor);
     if (str == NULL){
         str = smprintf("\uf071 ");
     } else{
@@ -340,7 +357,7 @@ void get_fan_speed(BlockData* data)
     rpm1_i = -1;
     rpm2_i = -1;
 
-    rpm1 = read_file("/sys/class/hwmon/hwmon5/fan1_input");
+    rpm1 = read_file(fan1_sensor);
     if (rpm1 == NULL){
         rpm1 = smprintf("\uf071 ");
     }else{
@@ -349,7 +366,7 @@ void get_fan_speed(BlockData* data)
         rpm1 = smprintf("%d", rpm1_i);
     }
 
-    rpm2 = read_file("/sys/class/hwmon/hwmon5/fan2_input");
+    rpm2 = read_file(fan2_sensor);
     if (rpm2 == NULL){
         rpm2 = smprintf("\uf071 ");
     }else{
@@ -517,9 +534,7 @@ void get_ram(BlockData* data)
         str = smprintf("%s", ram_str);
     }
     free(ram_str);
-    if(swap_str){
-        free(swap_str);
-    }
+    free(swap_str);
 
     // printf("uptime %ld\n", s.uptime);             
     // printf("%ld %ld %ld\n", s.loads[0], s.loads[1], s.loads[2]);
@@ -544,7 +559,8 @@ void sleep_until(time_t seconds)
     sleep(seconds-time(NULL));
 }
 
-int all_space(char *str){
+int all_space(char *str)
+{
     while(*str != 0){
         if(*str != ' '){
             return 0;
@@ -554,6 +570,102 @@ int all_space(char *str){
     return 1;
 }
 
+char* strip(char* str)
+{
+    size_t ln = strlen(str) - 1;
+    if (*str && str[ln] == '\n') {
+        str[ln] = '\0';
+    }
+    return str;
+}
+
+char* find_in_dir(char* path, char* hwmon_name, char* file)
+{
+    DIR           *d;
+    struct dirent *dir;
+
+    char* found_path = NULL;
+    int good_name = 0;
+    int bad_name = 0;
+
+    d = opendir(path);
+    if (d){
+        while ((dir = readdir(d)) != NULL && (!good_name || !found_path) && !bad_name){
+            if(dir->d_type == DT_REG){
+                if(!good_name && strcmp(dir->d_name, "name") == 0){
+                    char* name_path = smprintf("%s/name", path);
+                    char* content = read_file(name_path);
+                    bad_name = 1;
+                    if(content != NULL){
+                        strip(content);
+                        if(strcmp(content, hwmon_name) == 0){
+                            good_name = 1;
+                            bad_name = 0;
+                        }else{
+                        }
+                    }
+                    free(content);
+                    free(name_path);
+                }
+                else if (strcmp(dir->d_name, file) == 0){
+                    found_path = smprintf("%s/%s", path, file);
+                }
+            }
+        }
+        closedir(d);
+    }
+
+    if(!good_name){
+        free(found_path);
+        found_path = NULL;
+    }
+    return found_path;
+}
+
+char* find_sensor(char* path, char* hwmon_name, char* file)
+{
+    DIR           *d;
+    struct dirent *dir;
+    char* found_path = NULL;
+
+    d = opendir(path);
+    if (d){
+        while ((dir = readdir(d)) != NULL && !found_path){
+            if((dir->d_type == DT_DIR || dir->d_type == DT_LNK)  && strcmp(dir->d_name, ".") != 0 && strcmp(dir->d_name, "..") != 0){
+                char* complete_path = smprintf("%s/%s", path, dir->d_name);
+                found_path = find_in_dir(complete_path, hwmon_name, file);
+                free(complete_path);
+            }
+        }
+        closedir(d);
+    }
+    return found_path;
+}
+
+void detect_sensors(void)
+{
+    fan1_sensor         = find_sensor("/sys/class/hwmon", "dell_smm", "fan1_input");
+    fan2_sensor         = find_sensor("/sys/class/hwmon", "dell_smm", "fan2_input");
+    cpu_sensor          = find_sensor("/sys/class/hwmon", "coretemp", "temp1_input");
+
+    bat_status_sensor   = smprintf("/sys/class/power_supply/BAT0/status");
+    bat_curr_sensor     = smprintf("/sys/class/power_supply/BAT0/current_now");
+    bat_volt_sensor     = smprintf("/sys/class/power_supply/BAT0/voltage_now");
+    bat_present_sensor  = smprintf("/sys/class/power_supply/BAT0/present");
+    bat_capa_sensor     = smprintf("/sys/class/power_supply/BAT0/capacity");
+}
+
+void free_sensors(void)
+{
+    free(fan1_sensor);
+    free(fan2_sensor);
+    free(cpu_sensor);
+    free(bat_status_sensor);
+    free(bat_curr_sensor);
+    free(bat_volt_sensor);
+    free(bat_present_sensor);
+    free(bat_capa_sensor);
+}
 
 int main(void)
 {
@@ -591,6 +703,8 @@ int main(void)
         block_strings[i] = NULL;
     }
 
+    detect_sensors();
+
     while(1){
 
         /* Run tasks and update next_update if needed */
@@ -603,9 +717,7 @@ int main(void)
                 /* Query informations and format them using status2d color codes */
                 blocks[i].query(&data);
 
-                if(block_strings[i] != NULL){
-                     free(block_strings[i]);
-                }
+                free(block_strings[i]);
                 if(strlen(data.icon) != 0 && strlen(data.text) != 0){
                     if(all_space(data.text)){
                         block_strings[i] = smprintf("^c%s^^b%s^ %s ^c%s^^b%s^%s", bar_color, data.color, data.icon, data.color, bar_color, data.text);
@@ -660,6 +772,8 @@ int main(void)
     }
 
     XCloseDisplay(dpy);
+
+    free_sensors();
 
     return 0;
 }
