@@ -272,7 +272,8 @@ void get_power(BlockData* data)
         strcpy(data->text, "\uf071 ");
         return;
     }else{
-        if(!strcmp(file,"Full\n")){
+        strip(file);
+        if(!strcmp(file,"Full")){
             strcpy(data->icon, "");
             strcpy(data->text, "");
             return;
