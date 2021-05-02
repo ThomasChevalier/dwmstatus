@@ -1,5 +1,0 @@
-# dwmstatus
-Fork of https://git.suckless.org/dwmstatus/
-
-# Usage
-Add `dwmstatus 2>&1 >/dev/null &` to your xinit.rc
